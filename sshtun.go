@@ -441,6 +441,7 @@ func (tun *SSHTun) forward(localConn net.Conn, config *ssh.ClientConfig) {
 	server := tun.server.connectionString()
 	remote := tun.remote.connectionString()
 
+	log.Printf("##### SSH local %s, %s", server, config)
 	sshConn, err := ssh.Dial(tun.server.connectionType(), server, config)
 	if err != nil {
 		tun.errStarted(fmt.Errorf("SSH connection to %s failed: %s", server, err.Error()))
@@ -468,32 +469,30 @@ func (tun *SSHTun) forward(localConn net.Conn, config *ssh.ClientConfig) {
 		log.Printf("SSH tunnel OPEN: %s", connStr)
 	}
 
-	myCtx, myCancel := context.WithCancel(tun.ctx)
+	var wg sync.WaitGroup
 
+	wg.Add(1)
 	go func() {
 		_, err = io.Copy(remoteConn, localConn)
 		if err != nil {
-			//log.Printf("Error on io.Copy remote->local on connection %s: %s", connStr, err.Error())
-			myCancel()
-			return
+			log.Printf("Error on io.Copy local->remote on connection %s: %s", connStr, err.Error())
 		}
+		wg.Done()
 	}()
 
+	wg.Add(1)
 	go func() {
 		_, err = io.Copy(localConn, remoteConn)
 		if err != nil {
-			//log.Printf("Error on io.Copy local->remote on connection %s: %s", connStr, err.Error())
-			myCancel()
-			return
+			log.Printf("Error on io.Copy remote->local on connection %s: %s", connStr, err.Error())
 		}
+		wg.Done()
 	}()
 
-	select {
-	case <-myCtx.Done():
-		myCancel()
-		if tun.debug {
-			log.Printf("SSH tunnel CLOSE: %s", connStr)
-		}
+	wg.Wait()
+
+	if tun.debug {
+		log.Printf("SSH tunnel CLOSE: %s", connStr)
 	}
 }
 
